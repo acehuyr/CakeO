@@ -18,6 +18,7 @@ const cakeSchema = new mongoose.Schema({
   prepTime: { type: String },
   calories: { type: String },
   isAvailable: { type: Boolean, default: true },
+  salePercent: { type: Number, default: 0, min: 0, max: 90 },
   sizes: {
     small:  { type: Number, required: true },
     medium: { type: Number, required: true },

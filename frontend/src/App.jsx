@@ -642,6 +642,8 @@ function HomePage() {
 function CakeCard({ cake }) {
   const { dispatch } = useContext(AppCtx);
   const nav = (page, cakeId) => dispatch({ type: "NAV", page, cakeId });
+  const sale = cake.salePercent && cake.salePercent > 0;
+  const displayPrice = sale ? Math.round(cake.price * (1 - cake.salePercent / 100)) : cake.price;
 
   return (
     <div className="cake-card" onClick={() => nav("cake-detail", cake._id || cake.id)}>
@@ -649,6 +651,7 @@ function CakeCard({ cake }) {
         <img src={cake.image} alt={cake.name} loading="lazy" />
         <div className="img-overlay" />
         {cake.badge && <span className={`badge ${cake.badgeColor}`} style={{ position: "absolute", top: 14, left: 14, zIndex: 2 }}>{cake.badge}</span>}
+        {sale && <span className="badge badge-red" style={{ position: "absolute", top: cake.badge ? 40 : 14, left: 14, zIndex: 2 }}>SALE {cake.salePercent}% OFF</span>}
         <div style={{ position: "absolute", bottom: 14, left: 14, right: 14, zIndex: 2 }}>
           <div style={{ display: "flex", alignItems: "center", gap: 6, marginBottom: 4 }}>
             <Stars rating={cake.rating} size={13} />
@@ -659,12 +662,15 @@ function CakeCard({ cake }) {
       </div>
       <div style={{ padding: "16px 20px" }}>
         <div style={{ display: "flex", justifyContent: "space-between", alignItems: "center", marginBottom: 10 }}>
-          <span className="price">₹{cake.price}</span>
+          <div style={{ display: "flex", alignItems: "center", gap: 8 }}>
+            <span className="price">₹{displayPrice}</span>
+            {sale && <span style={{ fontSize: 14, color: "#78716C", textDecoration: "line-through" }}>₹{cake.price}</span>}
+          </div>
           <span className={`badge ${cake.badgeColor || "badge-amber"}`}>{cake.category}</span>
         </div>
         <p style={{ fontSize: 13, color: "#78716C", lineHeight: 1.5, marginBottom: 14, display: "-webkit-box", WebkitLineClamp: 2, WebkitBoxOrient: "vertical", overflow: "hidden" }}>{cake.description}</p>
         <div style={{ display: "flex", justifyContent: "space-between", alignItems: "center" }}>
-          <span style={{ fontSize: 12, color: "#57534E" }}>⏱ {cake.prepTime}</span>
+          <span style={{ fontSize: 12, color: "#57534E" }}>Prep: {cake.prepTime}</span>
           <button className="btn-primary" onClick={e => { e.stopPropagation(); nav("cake-detail", cake._id || cake.id); }} style={{ padding: "9px 18px", fontSize: 13, borderRadius: 8 }}>Order Now</button>
         </div>
       </div>
@@ -1434,7 +1440,17 @@ function AdminPage() {
   const [tab, setTab] = useState("overview");
   const [editCake, setEditCake] = useState(null);
   const [showForm, setShowForm] = useState(false);
-  const emptyForm = { name: "", price: "", image: "", description: "", category: "Chocolate", badge: "", badgeColor: "badge-amber", prepTime: "", calories: "", sizes: { small: "", medium: "", large: "" }, flavors: ["", "", ""], rating: 0, reviews: 0 };
+  const [deleteConfirm, setDeleteConfirm] = useState(null);
+  const [saleInputs, setSaleInputs] = useState({});
+  const [statusUpdating, setStatusUpdating] = useState({});
+
+  const emptyForm = { 
+    name: "", price: "", image: "", description: "", category: "Chocolate", 
+    badge: "", badgeColor: "badge-amber", prepTime: "", 
+    sizes: { small: "", medium: "", large: "" }, 
+    flavors: ["", "", ""], rating: 0, reviewCount: 0, 
+    salePercent: 0, isAvailable: true 
+  };
   const [cakeForm, setCakeForm] = useState(emptyForm);
 
   if (!state.user || state.user.role !== "admin") return (
@@ -1446,109 +1462,155 @@ function AdminPage() {
   );
 
   useEffect(() => {
-    if (state.user?.role === 'admin') {
-      api.get('/orders/all').then(res => dispatch({ type: "SET_ORDERS", orders: res.data.data })).catch(console.log);
+    if (state.user?.role === "admin") {
+      api.get("/orders/all").then(res => dispatch({ type: "SET_ORDERS", orders: res.data.data })).catch(console.log);
+      api.get("/cakes?showAll=true").then(res => dispatch({ type: "SET_CAKES", cakes: res.data.data })).catch(console.log);
     }
   }, [state.user, tab]);
 
   useEffect(() => {
-    if (!state.user || state.user.role !== 'admin' || state.orders.length === 0) return;
-    const socket = io(import.meta.env.VITE_SOCKET_URL || 'http://localhost:5000');
-    socket.on('admin_new_order', () => { api.get('/orders/all').then(res => dispatch({ type: "SET_ORDERS", orders: res.data.data })) });
-    socket.on('admin_update_order', () => { api.get('/orders/all').then(res => dispatch({ type: "SET_ORDERS", orders: res.data.data })) });
+    if (!state.user || state.user.role !== "admin") return;
+    const socket = io(import.meta.env.VITE_SOCKET_URL || "http://localhost:5000");
+    socket.on("admin_new_order", () => { api.get("/orders/all").then(res => dispatch({ type: "SET_ORDERS", orders: res.data.data })); });
+    socket.on("admin_update_order", () => { api.get("/orders/all").then(res => dispatch({ type: "SET_ORDERS", orders: res.data.data })); });
     return () => socket.disconnect();
   }, []);
 
+  const revenue = state.orders.reduce((s, o) => s + (o.total || 0), 0);
   const stats = [
-    { label: "Total Revenue", value: `₹${state.orders.reduce((s, o) => s + o.total, 0).toLocaleString()}`, icon: "💰", color: "#F59E0B" },
+    { label: "Total Revenue", value: `₹${revenue.toLocaleString()}`, icon: "💰", color: "#F59E0B" },
     { label: "Total Orders", value: state.orders.length, icon: "📦", color: "#60A5FA" },
     { label: "Total Cakes", value: state.cakes.length, icon: "🎂", color: "#A78BFA" },
-    { label: "Active Users", value: state.orders.length + 12, icon: "👥", color: "#34D399" },
+    { label: "On Sale", value: state.cakes.filter(c => c.salePercent > 0).length, icon: "🏷️", color: "#34D399" },
   ];
 
-  const openEdit = (cake) => { setEditCake(cake); setCakeForm({ ...cake, flavors: [...cake.flavors, "", ""].slice(0, 3), sizes: { ...cake.sizes } }); setShowForm(true); };
+  const applySale = async (cake) => {
+    const pct = parseInt(saleInputs[cake._id || cake.id] ?? cake.salePercent ?? 0);
+    if (isNaN(pct) || pct < 0 || pct > 90) { toast(dispatch, "Sale must be 0-90%", "error"); return; }
+    try {
+      await api.put(`/cakes/${cake._id || cake.id}`, { ...cake, salePercent: pct });
+      const res = await api.get("/cakes?showAll=true");
+      dispatch({ type: "SET_CAKES", cakes: res.data.data });
+      toast(dispatch, pct === 0 ? "Sale removed." : `${pct}% sale applied!`);
+    } catch {
+      toast(dispatch, "Failed to apply sale", "error");
+    }
+  };
+
+  const toggleAvail = async (cake) => {
+    try {
+      await api.put(`/cakes/${cake._id || cake.id}`, { ...cake, isAvailable: !cake.isAvailable });
+      const res = await api.get("/cakes?showAll=true");
+      dispatch({ type: "SET_CAKES", cakes: res.data.data });
+      toast(dispatch, cake.isAvailable ? "Cake hidden from customers." : "Cake is now live!");
+    } catch {
+      toast(dispatch, "Failed to toggle availability", "error");
+    }
+  };
+
+  const changeOrderStatus = async (orderId, newStatus) => {
+    setStatusUpdating(s => ({ ...s, [orderId]: true }));
+    try {
+      await api.put(`/orders/${orderId}/status`, { status: newStatus });
+      const res = await api.get("/orders/all");
+      dispatch({ type: "SET_ORDERS", orders: res.data.data });
+      toast(dispatch, `Order status updated.`, "info");
+    } catch {
+      toast(dispatch, "Failed to update order status", "error");
+    } finally {
+      setStatusUpdating(s => ({ ...s, [orderId]: false }));
+    }
+  };
+
+  const openEdit = (cake) => { setEditCake(cake); setCakeForm({ ...cake, flavors: [...(cake.flavors || []), "", ""].slice(0, 3), sizes: { ...cake.sizes } }); setShowForm(true); };
   const openAdd = () => { setEditCake(null); setCakeForm(emptyForm); setShowForm(true); };
 
   const saveForm = async () => {
     try {
-      const cake = { ...cakeForm, price: +cakeForm.price, rating: +cakeForm.rating || 0, reviews: +cakeForm.reviews || 0, sizes: { small: +cakeForm.sizes.small, medium: +cakeForm.sizes.medium, large: +cakeForm.sizes.large }, flavors: cakeForm.flavors.filter(f => f.trim()) };
-      if (editCake) { 
-        await api.put(`/cakes/${editCake.id || editCake._id}`, cake);
-        toast(dispatch, "Cake updated!", "info"); 
-      } else { 
-        await api.post('/cakes', cake);
-        toast(dispatch, "New cake added! 🎂"); 
-      }
+      const cake = { ...cakeForm, price: +cakeForm.price, rating: +cakeForm.rating || 0, reviewCount: +cakeForm.reviewCount || 0, salePercent: +cakeForm.salePercent || 0, sizes: { small: +cakeForm.sizes.small, medium: +cakeForm.sizes.medium, large: +cakeForm.sizes.large }, flavors: cakeForm.flavors.filter(f => f.trim()) };
+      if (editCake) { await api.put(`/cakes/${editCake._id || editCake.id}`, cake); toast(dispatch, "Cake updated!", "info"); } 
+      else { await api.post("/cakes", cake); toast(dispatch, "New cake added!"); }
       setShowForm(false);
-      const res = await api.get('/cakes');
+      const res = await api.get("/cakes?showAll=true");
       dispatch({ type: "SET_CAKES", cakes: res.data.data });
-    } catch(err) {
-      toast(dispatch, err.response?.data?.message || "Failed to save cake", "error");
-    }
+    } catch (err) { toast(dispatch, "Failed to save cake", "error"); }
   };
 
   const deleteCake = async (id) => {
     try {
       await api.delete(`/cakes/${id}`);
-      dispatch({ type: "ADMIN_DELETE_CAKE", id });
+      const res = await api.get("/cakes?showAll=true");
+      dispatch({ type: "SET_CAKES", cakes: res.data.data });
       toast(dispatch, "Cake deleted.", "info");
-    } catch(err) {
-      toast(dispatch, "Failed to delete", "error");
-    }
+    } catch { toast(dispatch, "Failed to delete", "error"); }
   };
 
-  const advanceStat = async (id, status) => {
-    try {
-      await api.put(`/orders/${id}/status`, { status: status + 1 });
-    } catch(err) {
-      toast(dispatch, "Failed to update", "error");
-    }
-  };
+  const statusBadgeClass = (s) => s === 3 ? "badge-green" : s === 2 ? "badge-blue" : s === 1 ? "badge-amber" : "badge-purple";
 
   return (
-    <div className="fade-in" style={{ maxWidth: 1200, margin: "0 auto", padding: "40px 24px" }}>
+    <div className="fade-in" style={{ maxWidth: 1280, margin: "0 auto", padding: "40px 24px" }}>
+
+      {/* Delete Confirm Modal */}
+      {deleteConfirm && (
+        <div style={{ position: "fixed", inset: 0, background: "rgba(0,0,0,0.75)", zIndex: 1000, display: "flex", alignItems: "center", justifyContent: "center" }}>
+          <div className="glass" style={{ padding: 32, borderRadius: 20, maxWidth: 400, width: "90%", textAlign: "center", border: "1px solid rgba(239,68,68,0.35)" }}>
+            <div style={{ fontSize: 40, marginBottom: 12 }}>🗑️</div>
+            <h3 style={{ fontSize: 20, fontWeight: 700, marginBottom: 8 }}>Delete Cake?</h3>
+            <p style={{ color: "#78716C", fontSize: 14, marginBottom: 28 }}>This action cannot be undone. The cake will be permanently removed.</p>
+            <div style={{ display: "flex", gap: 12, justifyContent: "center" }}>
+              <button className="btn-ghost" onClick={() => setDeleteConfirm(null)} style={{ padding: "11px 24px", fontSize: 14 }}>Cancel</button>
+              <button className="btn-danger" onClick={() => { deleteCake(deleteConfirm); setDeleteConfirm(null); }} style={{ padding: "11px 24px", fontSize: 14 }}>Yes, Delete</button>
+            </div>
+          </div>
+        </div>
+      )}
+
+      {/* Header */}
       <div style={{ display: "flex", justifyContent: "space-between", alignItems: "center", marginBottom: 32 }}>
-        <div><h1 style={{ fontSize: 36, fontWeight: 800, marginBottom: 6 }}>Admin Dashboard</h1><p className="section-subtitle">Welcome back, {state.user.name}</p></div>
+        <div>
+          <h1 style={{ fontSize: 36, fontWeight: 800, marginBottom: 4 }}>Admin Dashboard</h1>
+          <p className="section-subtitle">Manage your cakes and monitor orders</p>
+        </div>
         <div className="badge badge-amber" style={{ fontSize: 13, padding: "6px 14px" }}>Admin Panel</div>
       </div>
 
       {/* Tabs */}
       <div style={{ display: "flex", gap: 4, marginBottom: 32, background: "rgba(245,158,11,0.05)", padding: 4, borderRadius: 12, border: "1px solid rgba(245,158,11,0.1)", width: "fit-content" }}>
-        {["overview", "cakes", "orders"].map(t => (
-          <button key={t} onClick={() => setTab(t)} style={{ padding: "9px 22px", borderRadius: 9, cursor: "pointer", fontSize: 14, fontWeight: 500, fontFamily: "'DM Sans', sans-serif", border: "none", background: tab === t ? "rgba(245,158,11,0.2)" : "transparent", color: tab === t ? "#F59E0B" : "#78716C", textTransform: "capitalize", transition: "all 0.2s" }}>{t}</button>
+        {[["overview", "Overview"], ["cakes", "Cakes"], ["orders", "Orders"]].map(([t, label]) => (
+          <button key={t} onClick={() => setTab(t)} style={{ padding: "9px 22px", borderRadius: 9, cursor: "pointer", fontSize: 14, fontWeight: 500, fontFamily: "'DM Sans', sans-serif", border: "none", background: tab === t ? "rgba(245,158,11,0.2)" : "transparent", color: tab === t ? "#F59E0B" : "#78716C", transition: "all 0.2s" }}>{label}</button>
         ))}
       </div>
 
+      {/* OVERVIEW */}
       {tab === "overview" && (
         <div className="fade-in">
-          <div style={{ display: "grid", gridTemplateColumns: "repeat(auto-fill, minmax(200px, 1fr))", gap: 20, marginBottom: 40 }}>
+          <div style={{ display: "grid", gridTemplateColumns: "repeat(auto-fill, minmax(220px, 1fr))", gap: 20, marginBottom: 40 }}>
             {stats.map(s => (
-              <div key={s.label} className="stat-card">
-                <div style={{ display: "flex", justifyContent: "space-between", alignItems: "flex-start", marginBottom: 12 }}>
-                  <div style={{ fontSize: 11, color: "#78716C", fontWeight: 600, textTransform: "uppercase", letterSpacing: 0.5 }}>{s.label}</div>
+              <div key={s.label} className="stat-card" style={{ position: "relative", overflow: "hidden" }}>
+                <div style={{ fontSize: 11, color: "#78716C", fontWeight: 600, textTransform: "uppercase", letterSpacing: 0.5, marginBottom: 8 }}>{s.label}</div>
+                <div style={{ display: "flex", justifyContent: "space-between", alignItems: "center" }}>
+                  <div style={{ fontSize: 30, fontWeight: 800, fontFamily: "'DM Sans', sans-serif", color: s.color }}>{s.value}</div>
                   <span style={{ fontSize: 24 }}>{s.icon}</span>
                 </div>
-                <div style={{ fontSize: 28, fontWeight: 800, fontFamily: "'DM Sans', sans-serif", color: s.color }}>{s.value}</div>
               </div>
             ))}
           </div>
 
-          {/* Recent Orders */}
-          <h3 style={{ fontSize: 20, fontWeight: 700, marginBottom: 16 }}>Recent Orders</h3>
+          <h3 style={{ fontSize: 20, fontWeight: 700, marginBottom: 16 }}>Recent Order Activity</h3>
           <div className="glass" style={{ borderRadius: 16, overflow: "auto" }}>
             {state.orders.length === 0 ? (
-              <div style={{ padding: 40, textAlign: "center", color: "#78716C" }}>No orders yet</div>
+              <div style={{ padding: 48, textAlign: "center", color: "#78716C" }}>No orders yet</div>
             ) : (
               <table className="admin-table">
-                <thead><tr><th>Order ID</th><th>Items</th><th>Total</th><th>Status</th><th>Date</th></tr></thead>
+                <thead><tr><th>Order ID</th><th>Customer</th><th>Total</th><th>Status</th><th>Date</th></tr></thead>
                 <tbody>
                   {state.orders.slice(0, 5).map(o => (
                     <tr key={o._id || o.id}>
                       <td style={{ fontFamily: "'DM Sans', sans-serif", fontSize: 13, color: "#F59E0B", fontWeight: 600 }}>{(o._id || o.id || "").slice(-8).toUpperCase()}</td>
-                      <td style={{ fontSize: 13 }}>{o.items.map(i => (i.cake?.name || i.name || "Cake")).join(", ").substring(0, 40)}...</td>
+                      <td>{o.user?.name || "Customer"}</td>
                       <td style={{ fontWeight: 700, color: "#F59E0B" }}>₹{o.total}</td>
-                      <td><span className={`badge ${o.status === 3 ? "badge-green" : o.status === 2 ? "badge-blue" : "badge-amber"}`}>{ORDER_STATUSES[o.status]}</span></td>
-                      <td style={{ color: "#78716C", fontSize: 13 }}>{o.date || new Date(o.createdAt).toLocaleDateString("en-IN")}</td>
+                      <td><span className={`badge ${statusBadgeClass(o.status)}`}>{ORDER_STATUSES[o.status]}</span></td>
+                      <td style={{ color: "#78716C", fontSize: 13 }}>{new Date(o.createdAt || o.date || Date.now()).toLocaleDateString("en-IN")}</td>
                     </tr>
                   ))}
                 </tbody>
@@ -1558,65 +1620,72 @@ function AdminPage() {
         </div>
       )}
 
+      {/* CAKES */}
       {tab === "cakes" && (
         <div className="fade-in">
           <div style={{ display: "flex", justifyContent: "flex-end", marginBottom: 20 }}>
             <button className="btn-primary" onClick={openAdd} style={{ padding: "11px 24px", fontSize: 15 }}>+ Add New Cake</button>
           </div>
 
-          {/* Add/Edit Form */}
           {showForm && (
-            <div className="glass" style={{ padding: 28, borderRadius: 20, marginBottom: 28 }}>
-              <h3 style={{ fontSize: 18, fontWeight: 700, marginBottom: 20 }}>{editCake ? "Edit Cake" : "Add New Cake"}</h3>
+            <div className="glass" style={{ padding: 32, borderRadius: 20, marginBottom: 28, border: "1px solid rgba(245,158,11,0.2)" }}>
+              <h3 style={{ fontSize: 18, fontWeight: 700, marginBottom: 24 }}>{editCake ? "Edit Cake" : "Add New Cake"}</h3>
               <div style={{ display: "grid", gridTemplateColumns: "1fr 1fr", gap: 16 }}>
                 <div><label className="form-label">Cake Name</label><input className="input" value={cakeForm.name} onChange={e => setCakeForm(f => ({ ...f, name: e.target.value }))} placeholder="Chocolate Truffle" /></div>
                 <div><label className="form-label">Base Price (₹)</label><input className="input" type="number" value={cakeForm.price} onChange={e => setCakeForm(f => ({ ...f, price: e.target.value }))} placeholder="849" /></div>
                 <div style={{ gridColumn: "1/-1" }}><label className="form-label">Image URL</label><input className="input" value={cakeForm.image} onChange={e => setCakeForm(f => ({ ...f, image: e.target.value }))} placeholder="https://..." /></div>
                 <div style={{ gridColumn: "1/-1" }}><label className="form-label">Description</label><textarea className="input" value={cakeForm.description} onChange={e => setCakeForm(f => ({ ...f, description: e.target.value }))} style={{ resize: "vertical", minHeight: 70 }} /></div>
                 <div><label className="form-label">Category</label><select className="input" value={cakeForm.category} onChange={e => setCakeForm(f => ({ ...f, category: e.target.value }))}>{CATEGORIES.filter(c => c !== "All").map(c => <option key={c}>{c}</option>)}</select></div>
-                <div><label className="form-label">Badge</label><input className="input" value={cakeForm.badge} onChange={e => setCakeForm(f => ({ ...f, badge: e.target.value }))} placeholder="Bestseller" /></div>
-                <div><label className="form-label">Small Price (₹)</label><input className="input" type="number" value={cakeForm.sizes.small} onChange={e => setCakeForm(f => ({ ...f, sizes: { ...f.sizes, small: e.target.value } }))} /></div>
-                <div><label className="form-label">Medium Price (₹)</label><input className="input" type="number" value={cakeForm.sizes.medium} onChange={e => setCakeForm(f => ({ ...f, sizes: { ...f.sizes, medium: e.target.value } }))} /></div>
-                <div><label className="form-label">Large Price (₹)</label><input className="input" type="number" value={cakeForm.sizes.large} onChange={e => setCakeForm(f => ({ ...f, sizes: { ...f.sizes, large: e.target.value } }))} /></div>
-                <div><label className="form-label">Prep Time</label><input className="input" value={cakeForm.prepTime} onChange={e => setCakeForm(f => ({ ...f, prepTime: e.target.value }))} placeholder="2–3 hrs" /></div>
-                {[0, 1, 2].map(i => (
-                  <div key={i}><label className="form-label">Flavour {i + 1}</label><input className="input" value={cakeForm.flavors[i] || ""} onChange={e => { const fl = [...cakeForm.flavors]; fl[i] = e.target.value; setCakeForm(f => ({ ...f, flavors: fl })); }} placeholder={`Flavour ${i + 1}`} /></div>
-                ))}
+                <div><label className="form-label">Badge Label</label><input className="input" value={cakeForm.badge} onChange={e => setCakeForm(f => ({ ...f, badge: e.target.value }))} placeholder="Bestseller" /></div>
+                <div><label className="form-label">Prep Time</label><input className="input" value={cakeForm.prepTime} onChange={e => setCakeForm(f => ({ ...f, prepTime: e.target.value }))} placeholder="2-3 hrs" /></div>
+                <div><label className="form-label">Sale %</label><input className="input" type="number" min="0" max="90" value={cakeForm.salePercent} onChange={e => setCakeForm(f => ({ ...f, salePercent: e.target.value }))} /></div>
+                <div style={{ display: "flex", alignItems: "center", gap: 12 }}>
+                  <label className="form-label" style={{ marginBottom: 0 }}>Available?</label>
+                  <button type="button" onClick={() => setCakeForm(f => ({ ...f, isAvailable: !f.isAvailable }))} style={{ padding: "7px 18px", borderRadius: 20, border: `1px solid ${cakeForm.isAvailable ? "rgba(16,185,129,0.5)" : "rgba(239,68,68,0.4)"}`, background: cakeForm.isAvailable ? "rgba(16,185,129,0.15)" : "rgba(239,68,68,0.1)", color: cakeForm.isAvailable ? "#34D399" : "#F87171", cursor: "pointer", fontSize: 13, fontWeight: 600 }}>{cakeForm.isAvailable ? "Available" : "Hidden"}</button>
+                </div>
               </div>
-              <div style={{ display: "flex", gap: 12, marginTop: 20 }}>
+              <div style={{ display: "flex", gap: 12, marginTop: 24 }}>
                 <button className="btn-primary" onClick={saveForm} style={{ padding: "12px 28px", fontSize: 15 }}>{editCake ? "Save Changes" : "Add Cake"}</button>
                 <button className="btn-ghost" onClick={() => setShowForm(false)} style={{ padding: "12px 20px", fontSize: 14 }}>Cancel</button>
               </div>
             </div>
           )}
 
-          {/* Cakes Table */}
           <div className="glass" style={{ borderRadius: 16, overflow: "auto" }}>
             <table className="admin-table">
-              <thead><tr><th>Cake</th><th>Category</th><th>Price</th><th>Rating</th><th>Actions</th></tr></thead>
+              <thead><tr><th>Cake</th><th>Category</th><th>Price</th><th>Sale %</th><th>Visibility</th><th>Actions</th></tr></thead>
               <tbody>
-                {state.cakes.map(cake => (
-                  <tr key={cake._id || cake.id}>
-                    <td>
-                      <div style={{ display: "flex", alignItems: "center", gap: 12 }}>
-                        <img src={cake.image} alt="" style={{ width: 44, height: 44, borderRadius: 8, objectFit: "cover" }} />
-                        <div>
-                          <div style={{ fontSize: 14, fontWeight: 600 }}>{cake.name}</div>
-                          <div style={{ fontSize: 12, color: "#78716C" }}>{cake.badge || "—"}</div>
+                {state.cakes.map(cake => {
+                  const id = cake._id || cake.id;
+                  const saleVal = saleInputs[id] !== undefined ? saleInputs[id] : (cake.salePercent || 0);
+                  return (
+                    <tr key={id}>
+                      <td>
+                        <div style={{ display: "flex", alignItems: "center", gap: 12 }}>
+                          <img src={cake.image} alt="" style={{ width: 44, height: 44, borderRadius: 8, objectFit: "cover" }} />
+                          <div><div style={{ fontSize: 14, fontWeight: 600 }}>{cake.name}</div><div style={{ fontSize: 11, color: "#78716C" }}>{cake.badge || "—"}</div></div>
                         </div>
-                      </div>
-                    </td>
-                    <td><span className="badge badge-amber">{cake.category}</span></td>
-                    <td style={{ fontWeight: 700, color: "#F59E0B", fontSize: 15 }}>₹{cake.price}</td>
-                    <td><div style={{ display: "flex", alignItems: "center", gap: 6 }}><Stars rating={cake.rating} size={12} /><span style={{ fontSize: 13 }}>{cake.rating}</span></div></td>
-                    <td>
-                      <div style={{ display: "flex", gap: 8 }}>
-                        <button onClick={() => openEdit(cake)} className="btn-ghost" style={{ padding: "6px 14px", fontSize: 12, borderRadius: 7 }}>Edit</button>
-                        <button onClick={() => deleteCake(cake.id || cake._id)} className="btn-danger">Delete</button>
-                      </div>
-                    </td>
-                  </tr>
-                ))}
+                      </td>
+                      <td><span className="badge badge-amber">{cake.category}</span></td>
+                      <td><div style={{ fontWeight: 700, color: "#F59E0B" }}>₹{cake.price}</div></td>
+                      <td>
+                        <div style={{ display: "flex", alignItems: "center", gap: 6 }}>
+                          <input type="number" min="0" max="90" value={saleVal} onChange={e => setSaleInputs(s => ({ ...s, [id]: e.target.value }))} style={{ width: 55, padding: "5px 8px", background: "rgba(255,248,230,0.07)", border: "1px solid rgba(245,158,11,0.2)", color: "#FEF3C7", borderRadius: 6, fontSize: 13 }} />
+                          <button onClick={() => applySale(cake)} className="btn-ghost" style={{ padding: "5px 8px", fontSize: 11, borderRadius: 6 }}>Set</button>
+                        </div>
+                      </td>
+                      <td>
+                        <button onClick={() => toggleAvail(cake)} style={{ padding: "5px 14px", borderRadius: 20, border: `1px solid ${cake.isAvailable ? "rgba(16,185,129,0.4)" : "rgba(239,68,68,0.4)"}`, background: cake.isAvailable ? "rgba(16,185,129,0.1)" : "rgba(239,68,68,0.1)", color: cake.isAvailable ? "#34D399" : "#F87171", fontSize: 12, fontWeight: 600, cursor: "pointer" }}>{cake.isAvailable ? "Live" : "Hidden"}</button>
+                      </td>
+                      <td>
+                        <div style={{ display: "flex", gap: 8 }}>
+                          <button onClick={() => openEdit(cake)} className="btn-ghost" style={{ padding: "6px 14px", fontSize: 13, borderRadius: 7 }}>Edit</button>
+                          <button onClick={() => setDeleteConfirm(id)} className="btn-danger" style={{ padding: "6px 14px", fontSize: 13, borderRadius: 7 }}>Delete</button>
+                        </div>
+                      </td>
+                    </tr>
+                  );
+                })}
               </tbody>
             </table>
           </div>
@@ -1625,25 +1694,26 @@ function AdminPage() {
 
       {tab === "orders" && (
         <div className="fade-in">
+          <h2 style={{ fontSize: 22, fontWeight: 700, marginBottom: 20 }}>Order History ({state.orders.length} orders)</h2>
           <div className="glass" style={{ borderRadius: 16, overflow: "auto" }}>
             {state.orders.length === 0 ? (
               <div style={{ padding: 60, textAlign: "center", color: "#78716C" }}>No orders yet</div>
             ) : (
               <table className="admin-table">
-                <thead><tr><th>Order ID</th><th>Customer</th><th>Items</th><th>Total</th><th>Status</th><th>Date</th><th>Action</th></tr></thead>
+                <thead><tr><th>Order ID</th><th>Customer</th><th>Items</th><th>Total</th><th>Status</th><th>Date</th><th>Update</th></tr></thead>
                 <tbody>
                   {state.orders.map(o => (
-                    <tr key={o.id}>
-                      <td style={{ color: "#F59E0B", fontWeight: 600, fontSize: 13 }}>{o._id || o.id}</td>
-                      <td style={{ fontSize: 13 }}>{o.user?.name || state.user?.name || "Customer"}</td>
-                      <td style={{ fontSize: 13, color: "#A8A29E" }}>{o.items.length} item{o.items.length > 1 ? "s" : ""}</td>
+                    <tr key={o._id || o.id}>
+                      <td style={{ color: "#F59E0B", fontWeight: 600, fontSize: 12 }}>{(o._id || o.id || "").slice(-8).toUpperCase()}</td>
+                      <td>{o.user?.name || "Customer"}</td>
+                      <td style={{ fontSize: 13, color: "#A8A29E" }}>{o.items.map(i => i.name).join(", ").substring(0, 30)}...</td>
                       <td style={{ fontWeight: 700, color: "#F59E0B" }}>₹{o.total}</td>
-                      <td><span className={`badge ${o.status === 3 ? "badge-green" : o.status === 2 ? "badge-blue" : o.status === 1 ? "badge-amber" : "badge-purple"}`}>{ORDER_STATUSES[o.status]}</span></td>
-                      <td style={{ color: "#78716C", fontSize: 13 }}>{new Date(o.createdAt || o.date).toLocaleDateString("en-IN")}</td>
+                      <td><span className={`badge ${statusBadgeClass(o.status)}`}>{ORDER_STATUSES[o.status]}</span></td>
+                      <td style={{ color: "#78716C", fontSize: 13 }}>{new Date(o.createdAt || o.date || Date.now()).toLocaleDateString("en-IN")}</td>
                       <td>
-                        {o.status < 3 && (
-                          <button className="btn-ghost" onClick={() => advanceStat(o._id || o.id, o.status)} style={{ padding: "6px 14px", fontSize: 12, borderRadius: 7, whiteSpace: "nowrap" }}>Advance →</button>
-                        )}
+                        <select value={o.status} disabled={statusUpdating[o._id || o.id]} onChange={e => changeOrderStatus(o._id || o.id, parseInt(e.target.value))} style={{ background: "rgba(255,248,230,0.07)", border: "1px solid rgba(245,158,11,0.2)", color: "#FEF3C7", padding: "6px 10px", borderRadius: 8, fontSize: 12, cursor: "pointer" }}>
+                          {ORDER_STATUSES.map((s, i) => <option key={i} value={i} style={{ background: "#1C1209" }}>{s}</option>)}
+                        </select>
                       </td>
                     </tr>
                   ))}

@@ -22,7 +22,7 @@ exports.signup = async (req, res) => {
     }
     const existingUser = await User.findOne({ email });
     if (existingUser) return res.status(400).json({ message: 'Email already registered' });
-    const user = await User.create({ name, email, password, phone, role: email === 'admin@cakeo.com' ? 'admin' : 'user' });
+    const user = await User.create({ name, email, password, phone, role: email === 'admin@gmail.com' ? 'admin' : 'user' });
     createSendToken(user, 201, res);
   } catch (err) {
     console.error('Signup error:', err);

@@ -2,7 +2,7 @@ const Cake = require('../models/Cake');
 
 exports.getAllCakes = async (req, res) => {
   try {
-    const { category, minRating, maxPrice, search, sort = '-reviewCount' } = req.query;
+    const { category, minRating, maxPrice, search, sort = '-reviewCount', showAll } = req.query;
     let query = {};
 
     if (category && category !== 'All') query.category = category;
@@ -14,9 +14,9 @@ exports.getAllCakes = async (req, res) => {
         { description: { $regex: search, $options: 'i' } }
       ];
     }
-    query.isAvailable = true;
+    // Only show available cakes to regular users; admin can see all
+    if (!showAll) query.isAvailable = true;
 
-    // Use default sort if specific fields fail
     let sortObj = {};
     if (sort === 'price-asc') sortObj = { 'sizes.small': 1 };
     else if (sort === 'price-desc') sortObj = { 'sizes.small': -1 };
