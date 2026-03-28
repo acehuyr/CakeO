@@ -8,7 +8,7 @@ const cakeSchema = new mongoose.Schema({
   images: [{ type: String }],
   category: {
     type: String,
-    enum: ['Chocolate', 'Classic', 'Fruit', 'Caramel', 'Custom'],
+    enum: ['Chocolate', 'Classic', 'Fruit', 'Caramel', 'Fusion', 'Custom'],
     required: true
   },
   rating: { type: Number, default: 0, min: 0, max: 5 },

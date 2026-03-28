@@ -332,7 +332,7 @@ const CAKES = [
   { id: 7, name: "Fruit Overload Cake", price: 999, image: "https://images.unsplash.com/photo-1464349095431-e9a21285b5f3?w=600&q=80", description: "Fresh seasonal berries piled high on a vanilla cream sponge with mango coulis. Bursting with natural color, flavor, and wholesome goodness.", category: "Fruit", rating: 4.7, reviewCount: 143, sizes: { small: 999, medium: 1499, large: 1999 }, flavors: ["Mixed Berries", "Tropical Medley", "Classic Fruit"], badge: "Healthy Pick", badgeColor: "badge-green", prepTime: "3–4 hrs", calories: "290 kcal/slice" },
 ];
 
-const CATEGORIES = ["All", "Chocolate", "Classic", "Fruit", "Caramel"];
+const CATEGORIES = ["All", "Chocolate", "Classic", "Fruit", "Caramel", "Fusion"];
 const ORDER_STATUSES = ["Confirmed", "Preparing", "Out for Delivery", "Delivered"];
 
 /* ════════════════════════════════════════
